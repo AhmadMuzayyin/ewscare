@@ -61,6 +61,21 @@ select:focus[data-flux-control] {
     @apply outline-hidden ring-2 ring-accent ring-offset-2 ring-offset-accent-foreground;
 }
 
-/* \[:where(&)\]:size-4 {
-    @apply size-4;
-} */
+/* Custom Table Spacing & Padding for all pages */
+[data-flux-table] {
+    @apply w-full border-collapse;
+}
+
+[data-flux-column] {
+    @apply !py-3.5 !px-5 first:!ps-6 last:!pe-6 text-sm font-semibold;
+}
+
+[data-flux-cell] {
+    @apply !py-4 !px-5 first:!ps-6 last:!pe-6 text-sm;
+}
+
+div:has(> ui-table-scroll-area) > nav,
+div:has(> [data-flux-table]) > nav {
+    @apply !px-6 !py-4 border-t border-zinc-200 dark:border-zinc-800;
+}
+

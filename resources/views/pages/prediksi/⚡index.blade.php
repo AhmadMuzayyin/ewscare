@@ -8,7 +8,7 @@ use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Flux\Flux;
 
-new #[Title('Prediksi & Pengujian Model')] class extends Component {
+new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
     // Array to store the simulated prediction results for all datasets
     public array $predictions = [];
     public float $accuracy = 0.0;
@@ -41,7 +41,7 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
 
         foreach ($datasets as $dataset) {
             $checkedGejalaIds = $dataset->gejalas->pluck('id')->toArray();
-            
+
             $results = [];
 
             foreach ($penyakits as $penyakit) {
@@ -75,7 +75,7 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
 
             // Normalize scores to get probabilities
             $totalScore = array_sum(array_column($results, 'score'));
-            
+
             if ($totalScore > 0) {
                 foreach ($results as $id => $data) {
                     $results[$id]['probability'] = $data['score'] / $totalScore;
@@ -115,7 +115,7 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
         $this->totalIncorrect = $totalDatasets - $correctCount;
         $this->accuracy = ($correctCount / $totalDatasets) * 100;
 
-        Flux::toast(variant: 'success', text: __('Hasil prediksi seluruh dataset berhasil diperbarui.'));
+        Flux::toast(variant: 'success', text: __('Hasil Klasifikasi seluruh dataset berhasil diperbarui.'));
     }
 };
 ?>
@@ -124,11 +124,11 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
     <!-- Header -->
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-            <flux:heading size="xl" level="1">{{ __('Pengujian & Prediksi Naive Bayes') }}</flux:heading>
-            <flux:text>{{ __('Halaman evaluasi model Naive Bayes secara otomatis memprediksi seluruh data yang tersimpan di Dataset Training.') }}</flux:text>
+            <flux:heading size="xl" level="1">{{ __('Pengujian & Klasifikasi Naive Bayes') }}</flux:heading>
+            <flux:text>{{ __('Halaman evaluasi model Naive Bayes secara otomatis memKlasifikasi seluruh data yang tersimpan di Dataset Training.') }}</flux:text>
         </div>
         <flux:button icon="arrow-path" variant="primary" wire:click="calculateAllPredictions">
-            {{ __('Perbarui Prediksi Dataset') }}
+            {{ __('Perbarui Klasifikasi Dataset') }}
         </flux:button>
     </div>
 
@@ -149,7 +149,7 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
                 <flux:icon name="check-circle" class="size-6" />
             </div>
             <div>
-                <flux:text size="sm" class="text-zinc-500">{{ __('Prediksi Cocok') }}</flux:text>
+                <flux:text size="sm" class="text-zinc-500">{{ __('Klasifikasi Cocok') }}</flux:text>
                 <flux:heading size="lg" class="text-emerald-600 dark:text-emerald-400">{{ $totalCorrect }}</flux:heading>
             </div>
         </flux:card>
@@ -159,7 +159,7 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
                 <flux:icon name="x-circle" class="size-6" />
             </div>
             <div>
-                <flux:text size="sm" class="text-zinc-500">{{ __('Prediksi Tidak Cocok') }}</flux:text>
+                <flux:text size="sm" class="text-zinc-500">{{ __('Klasifikasi Tidak Cocok') }}</flux:text>
                 <flux:heading size="lg" class="text-red-600 dark:text-red-400">{{ $totalIncorrect }}</flux:heading>
             </div>
         </flux:card>
@@ -178,56 +178,56 @@ new #[Title('Prediksi & Pengujian Model')] class extends Component {
     <!-- Predictions Evaluation Table -->
     <flux:card class="overflow-x-auto p-0">
         @if(count($predictions) > 0)
-            <flux:table>
-                <flux:table.columns>
-                    <flux:table.column class="pl-4">{{ __('No') }}</flux:table.column>
-                    <flux:table.column>{{ __('Penyakit Target (Dataset)') }}</flux:table.column>
-                    <flux:table.column>{{ __('Gejala Penyakit') }}</flux:table.column>
-                    <flux:table.column>{{ __('Hasil Prediksi Naive Bayes') }}</flux:table.column>
-                    <flux:table.column>{{ __('Probabilitas') }}</flux:table.column>
-                    <flux:table.column>{{ __('Keyakinan') }}</flux:table.column>
-                    <flux:table.column class="w-24 text-center">{{ __('Status') }}</flux:table.column>
-                </flux:table.columns>
-                <flux:table.rows>
-                    @foreach ($predictions as $index => $pred)
-                        <flux:table.row :key="$pred['id']">
-                            <flux:table.cell class="pl-4 font-semibold text-zinc-500">{{ $index + 1 }}</flux:table.cell>
-                            <flux:table.cell variant="strong" class="whitespace-nowrap">
-                                {{ $pred['penyakit_asli']->nama_penyakit }}
-                            </flux:table.cell>
-                            <flux:table.cell class="max-w-md">
-                                <div class="flex flex-wrap gap-1">
-                                    @foreach ($pred['gejalas'] as $gejala)
-                                        <flux:badge size="sm" variant="outline" color="blue">
-                                            {{ $gejala->nama_gejala }}
-                                        </flux:badge>
-                                    @endforeach
-                                </div>
-                            </flux:table.cell>
-                            <flux:table.cell class="font-semibold {{ $pred['is_correct'] ? 'text-zinc-900 dark:text-white' : 'text-red-600 dark:text-red-400' }}">
-                                {{ $pred['predicted_penyakit']->nama_penyakit }}
-                            </flux:table.cell>
-                            <flux:table.cell class="font-mono text-xs">{{ number_format($pred['probability'], 5) }}</flux:table.cell>
-                            <flux:table.cell>
-                                <flux:badge color="blue" variant="outline">{{ number_format($pred['confidence'], 2) }}%</flux:badge>
-                            </flux:cell>
-                            <flux:table.cell class="text-center">
-                                @if($pred['is_correct'])
-                                    <flux:badge color="emerald" size="sm">{{ __('Cocok') }}</flux:badge>
-                                @else
-                                    <flux:badge color="red" size="sm">{{ __('Tidak Cocok') }}</flux:badge>
-                                @endif
-                            </flux:table.cell>
-                        </flux:table.row>
-                    @endforeach
-                </flux:table.rows>
-            </flux:table>
+        <flux:table>
+            <flux:table.columns>
+                <flux:table.column class="pl-4">{{ __('No') }}</flux:table.column>
+                <flux:table.column>{{ __('Penyakit Target (Dataset)') }}</flux:table.column>
+                <flux:table.column>{{ __('Gejala Penyakit') }}</flux:table.column>
+                <flux:table.column>{{ __('Hasil Klasifikasi Naive Bayes') }}</flux:table.column>
+                <flux:table.column>{{ __('Probabilitas') }}</flux:table.column>
+                <flux:table.column>{{ __('Keyakinan') }}</flux:table.column>
+                <flux:table.column class="w-24 text-center">{{ __('Status') }}</flux:table.column>
+            </flux:table.columns>
+            <flux:table.rows>
+                @foreach ($predictions as $index => $pred)
+                <flux:table.row :key="$pred['id']">
+                    <flux:table.cell class="pl-4 font-semibold text-zinc-500">{{ $index + 1 }}</flux:table.cell>
+                    <flux:table.cell variant="strong" class="whitespace-nowrap">
+                        {{ $pred['penyakit_asli']->nama_penyakit }}
+                    </flux:table.cell>
+                    <flux:table.cell class="max-w-md">
+                        <div class="flex flex-wrap gap-1">
+                            @foreach ($pred['gejalas'] as $gejala)
+                            <flux:badge size="sm" variant="outline" color="blue">
+                                {{ $gejala->nama_gejala }}
+                            </flux:badge>
+                            @endforeach
+                        </div>
+                    </flux:table.cell>
+                    <flux:table.cell class="font-semibold {{ $pred['is_correct'] ? 'text-zinc-900 dark:text-white' : 'text-red-600 dark:text-red-400' }}">
+                        {{ $pred['predicted_penyakit']->nama_penyakit }}
+                    </flux:table.cell>
+                    <flux:table.cell class="font-mono text-xs">{{ number_format($pred['probability'], 5) }}</flux:table.cell>
+                    <flux:table.cell>
+                        <flux:badge color="blue" variant="outline">{{ number_format($pred['confidence'], 2) }}%</flux:badge>
+                        </flux:cell>
+                        <flux:table.cell class="text-center">
+                            @if($pred['is_correct'])
+                            <flux:badge color="emerald" size="sm">{{ __('Cocok') }}</flux:badge>
+                            @else
+                            <flux:badge color="red" size="sm">{{ __('Tidak Cocok') }}</flux:badge>
+                            @endif
+                        </flux:table.cell>
+                </flux:table.row>
+                @endforeach
+            </flux:table.rows>
+        </flux:table>
         @else
-            <div class="text-center p-12 text-zinc-400 dark:text-zinc-500">
-                <flux:icon name="circle-stack" class="size-12 mx-auto mb-3" />
-                <div class="font-medium text-lg">{{ __('Belum Ada Dataset Training') }}</div>
-                <flux:text class="text-sm mt-1">{{ __('Silakan tambahkan dataset training terlebih dahulu sebelum menjalankan prediksi.') }}</flux:text>
-            </div>
+        <div class="text-center p-12 text-zinc-400 dark:text-zinc-500">
+            <flux:icon name="circle-stack" class="size-12 mx-auto mb-3" />
+            <div class="font-medium text-lg">{{ __('Belum Ada Dataset Training') }}</div>
+            <flux:text class="text-sm mt-1">{{ __('Silakan tambahkan dataset training terlebih dahulu sebelum menjalankan klasifikasi.') }}</flux:text>
+        </div>
         @endif
     </flux:card>
 </div>

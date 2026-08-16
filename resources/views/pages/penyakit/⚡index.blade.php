@@ -39,7 +39,7 @@ new #[Title('Data Penyakit')] class extends Component {
     public function openCreateModal(): void
     {
         $this->editingPenyakit = null;
-        
+
         $lastPenyakit = Penyakit::orderBy('id', 'desc')->first();
         if ($lastPenyakit && preg_match('/P(\d+)/', $lastPenyakit->kode_penyakit, $matches)) {
             $nextNumber = intval($matches[1]) + 1;
@@ -100,7 +100,7 @@ new #[Title('Data Penyakit')] class extends Component {
     <div class="flex items-center justify-between">
         <div>
             <flux:heading size="xl" level="1">{{ __('Data Penyakit') }}</flux:heading>
-            <flux:text>{{ __('Kelola data penyakit untuk target prediksi dan konfigurasi EWS.') }}</flux:text>
+            <flux:text>{{ __('Kelola data penyakit untuk target klasifikasi dan konfigurasi EWS.') }}</flux:text>
         </div>
         <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Penyakit') }}</flux:button>
     </div>
@@ -120,24 +120,24 @@ new #[Title('Data Penyakit')] class extends Component {
             </flux:table.columns>
             <flux:table.rows>
                 @foreach ($this->penyakits as $penyakit)
-                    <flux:table.row :key="$penyakit->id">
-                        <flux:table.cell class="pl-4" variant="strong">{{ $penyakit->kode_penyakit }}</flux:table.cell>
-                        <flux:table.cell>{{ $penyakit->nama_penyakit }}</flux:table.cell>
-                        <flux:table.cell>
-                            <flux:badge size="sm" :color="$penyakit->is_menular ? 'red' : 'zinc'">
-                                {{ $penyakit->is_menular ? __('Menular (EWS)') : __('Tidak Menular') }}
-                            </flux:badge>
-                        </flux:table.cell>
-                        <flux:table.cell class="max-w-xs truncate">
-                            {{ $penyakit->solusi_pencegahan ?: '—' }}
-                        </flux:table.cell>
-                        <flux:table.cell class="flex gap-2">
-                            <flux:button variant="ghost" icon="pencil-square" size="sm" wire:click="editPenyakit({{ $penyakit->id }})" />
-                            <flux:button variant="ghost" icon="trash" size="sm" class="text-red-500 hover:text-red-600" 
-                                wire:confirm="Apakah Anda yakin ingin menghapus penyakit ini?" 
-                                wire:click="deletePenyakit({{ $penyakit->id }})" />
-                        </flux:table.cell>
-                    </flux:table.row>
+                <flux:table.row :key="$penyakit->id">
+                    <flux:table.cell class="pl-4" variant="strong">{{ $penyakit->kode_penyakit }}</flux:table.cell>
+                    <flux:table.cell>{{ $penyakit->nama_penyakit }}</flux:table.cell>
+                    <flux:table.cell>
+                        <flux:badge size="sm" :color="$penyakit->is_menular ? 'red' : 'zinc'">
+                            {{ $penyakit->is_menular ? __('Menular (EWS)') : __('Tidak Menular') }}
+                        </flux:badge>
+                    </flux:table.cell>
+                    <flux:table.cell class="max-w-xs truncate">
+                        {{ $penyakit->solusi_pencegahan ?: '—' }}
+                    </flux:table.cell>
+                    <flux:table.cell class="flex gap-2">
+                        <flux:button variant="ghost" icon="pencil-square" size="sm" wire:click="editPenyakit({{ $penyakit->id }})" />
+                        <flux:button variant="ghost" icon="trash" size="sm" class="text-red-500 hover:text-red-600"
+                            wire:confirm="Apakah Anda yakin ingin menghapus penyakit ini?"
+                            wire:click="deletePenyakit({{ $penyakit->id }})" />
+                    </flux:table.cell>
+                </flux:table.row>
                 @endforeach
             </flux:table.rows>
         </flux:table>
@@ -153,7 +153,7 @@ new #[Title('Data Penyakit')] class extends Component {
 
             <flux:input label="{{ __('Kode Penyakit') }}" wire:model="kode_penyakit" placeholder="Contoh: P01" required />
             <flux:input label="{{ __('Nama Penyakit') }}" wire:model="nama_penyakit" placeholder="Contoh: Scabies" required />
-            
+
             <flux:checkbox label="{{ __('Penyakit Menular (Trigger Early Warning System)') }}" wire:model="is_menular" />
 
             <flux:textarea label="{{ __('Rekomendasi Tindakan Preventif') }}" wire:model="solusi_pencegahan" placeholder="Contoh: Karantina kamar, jemur kasur, bersihkan pakaian dengan air panas." />

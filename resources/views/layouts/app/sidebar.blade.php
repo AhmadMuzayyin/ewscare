@@ -45,7 +45,7 @@
                 </flux:sidebar.item>
                 <flux:sidebar.item icon="beaker" :href="route('prediksi.index')"
                     :current="request()->routeIs('prediksi.index')" wire:navigate>
-                    {{ __('Prediksi') }}
+                    {{ __('Klasifikasi') }}
                 </flux:sidebar.item>
                 <flux:sidebar.item icon="document-text" :href="route('laporan.index')"
                     :current="request()->routeIs('laporan.index')" wire:navigate>
@@ -109,9 +109,9 @@
     {{ $slot }}
 
     @persist('toast')
-        <flux:toast.group>
-            <flux:toast />
-        </flux:toast.group>
+    <flux:toast.group>
+        <flux:toast />
+    </flux:toast.group>
     @endpersist
 
     @fluxScripts
