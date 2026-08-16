@@ -3,11 +3,11 @@
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return to_route('dashboard.index');
+    return view('welcome');
 })->name('home');
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    Route::livewire('dashboard', 'pages::dashboard')->name('dashboard.index');
+    Route::livewire('dashboard', 'pages::dashboard')->name('dashboard');
     Route::livewire('kamar', 'pages::kamar.index')->name('kamar.index');
     Route::livewire('santri', 'pages::santri.index')->name('santri.index');
     Route::livewire('gejala', 'pages::gejala.index')->name('gejala.index');

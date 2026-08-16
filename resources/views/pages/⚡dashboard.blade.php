@@ -295,7 +295,9 @@ new #[Title('Dashboard EWS Spasial')] class extends Component {
 
                 <div class="flex">
                     <flux:spacer />
-                    <flux:button variant="ghost" wire:click="$slideOver('kamar-detail-modal').close()">{{ __('Tutup') }}</flux:button>
+                    <flux:modal.close>
+                        <flux:button variant="ghost">{{ __('Tutup') }}</flux:button>
+                    </flux:modal.close>
                 </div>
             </div>
         @endif
