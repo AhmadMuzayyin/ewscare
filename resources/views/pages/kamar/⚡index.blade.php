@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Kamar;
+use App\Models\Wilayah;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\Attributes\Title;
@@ -16,7 +17,7 @@ new #[Title('Data Kamar')] class extends Component {
 
     // Form states
     public ?Kamar $editingKamar = null;
-    public string $wilayah = '';
+    public ?int $wilayah_id = null;
     public string $blok = '';
     public string $nama_kamar = '';
     public int $kapasitas = 10;
@@ -40,22 +41,23 @@ new #[Title('Data Kamar')] class extends Component {
     public function kamars()
     {
         return Kamar::query()
+            ->with('wilayah')
             ->when($this->search, function ($query) {
                 $query->where('nama_kamar', 'like', '%' . $this->search . '%')
                     ->orWhere('blok', 'like', '%' . $this->search . '%');
             })
-            ->when($this->filterWilayah, fn($query) => $query->where('wilayah', $this->filterWilayah))
+            ->when($this->filterWilayah, fn($query) => $query->where('wilayah_id', $this->filterWilayah))
             ->when($this->filterBlok, fn($query) => $query->where('blok', $this->filterBlok))
-            ->orderBy('wilayah')
+            ->orderBy('wilayah_id')
             ->orderBy('blok')
             ->orderBy('nama_kamar')
             ->paginate(10);
     }
 
     #[Computed]
-    public function wilayahOptions(): array
+    public function wilayahOptions()
     {
-        return ['Wilayah 1', 'Wilayah 2', 'Wilayah 3'];
+        return Wilayah::orderBy('nama_wilayah')->get();
     }
 
     #[Computed]
@@ -67,7 +69,7 @@ new #[Title('Data Kamar')] class extends Component {
     public function openCreateModal(): void
     {
         $this->editingKamar = null;
-        $this->wilayah = '';
+        $this->wilayah_id = null;
         $this->blok = '';
         $this->nama_kamar = '';
         $this->kapasitas = 10;
@@ -78,7 +80,7 @@ new #[Title('Data Kamar')] class extends Component {
     public function editKamar(int $id): void
     {
         $this->editingKamar = Kamar::findOrFail($id);
-        $this->wilayah = $this->editingKamar->wilayah;
+        $this->wilayah_id = $this->editingKamar->wilayah_id;
         $this->blok = $this->editingKamar->blok;
         $this->nama_kamar = $this->editingKamar->nama_kamar;
         $this->kapasitas = $this->editingKamar->kapasitas;
@@ -89,7 +91,7 @@ new #[Title('Data Kamar')] class extends Component {
     public function saveKamar(): void
     {
         $rules = [
-            'wilayah' => 'required|string|max:255',
+            'wilayah_id' => 'required|exists:wilayahs,id',
             'blok' => 'required|string|max:255',
             'nama_kamar' => 'required|string|max:255',
             'kapasitas' => 'required|integer|min:1',
@@ -131,7 +133,7 @@ new #[Title('Data Kamar')] class extends Component {
         <flux:select wire:model.live="filterWilayah" placeholder="Semua Wilayah" class="w-full sm:w-48">
             <option value="">Semua Wilayah</option>
             @foreach ($this->wilayahOptions as $option)
-                <option value="{{ $option }}">{{ $option }}</option>
+                <option value="{{ $option->id }}">{{ $option->nama_wilayah }}</option>
             @endforeach
         </flux:select>
 
@@ -155,7 +157,7 @@ new #[Title('Data Kamar')] class extends Component {
             <flux:table.rows>
                 @foreach ($this->kamars as $kamar)
                     <flux:table.row :key="$kamar->id">
-                        <flux:table.cell class="pl-4">{{ $kamar->wilayah }}</flux:table.cell>
+                        <flux:table.cell class="pl-4">{{ $kamar->wilayah->nama_wilayah }}</flux:table.cell>
                         <flux:table.cell>{{ $kamar->blok }}</flux:table.cell>
                         <flux:table.cell variant="strong">{{ $kamar->nama_kamar }}</flux:table.cell>
                         <flux:table.cell>{{ $kamar->kapasitas }} {{ __('Santri') }}</flux:table.cell>
@@ -179,11 +181,11 @@ new #[Title('Data Kamar')] class extends Component {
                 <flux:text class="mt-2">{{ __('Lengkapi informasi kamar di bawah ini.') }}</flux:text>
             </div>
 
-            <flux:select label="{{ __('Wilayah') }}" wire:model="wilayah" required>
+            <flux:select label="{{ __('Wilayah') }}" wire:model="wilayah_id" required>
                 <option value="">{{ __('Pilih Wilayah') }}</option>
-                <option value="Wilayah 1">{{ __('Wilayah 1') }}</option>
-                <option value="Wilayah 2">{{ __('Wilayah 2') }}</option>
-                <option value="Wilayah 3">{{ __('Wilayah 3') }}</option>
+                @foreach ($this->wilayahOptions as $option)
+                    <option value="{{ $option->id }}">{{ $option->nama_wilayah }}</option>
+                @endforeach
             </flux:select>
 
             <flux:input label="{{ __('Blok') }}" wire:model="blok" placeholder="Contoh: Blok A, DKL, BPBAE" required />

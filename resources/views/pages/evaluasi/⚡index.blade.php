@@ -3,12 +3,15 @@
 use App\Models\DatasetTraining;
 use App\Models\Gejala;
 use App\Models\Penyakit;
+use App\Models\Santri;
 use Livewire\Component;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Flux\Flux;
 
 new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
+    public ?int $santri_id = null;
+
     // Array to store the simulated prediction results for all datasets
     public array $predictions = [];
     public float $accuracy = 0.0;
@@ -18,6 +21,12 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
     public function mount(): void
     {
         $this->calculateAllPredictions();
+    }
+
+    #[Computed]
+    public function santriOptions()
+    {
+        return Santri::orderBy('nama')->get();
     }
 
     public function calculateAllPredictions(): void
@@ -127,9 +136,17 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
             <flux:heading size="xl" level="1">{{ __('Pengujian & Klasifikasi Naive Bayes') }}</flux:heading>
             <flux:text>{{ __('Halaman evaluasi model Naive Bayes secara otomatis memKlasifikasi seluruh data yang tersimpan di Dataset Training.') }}</flux:text>
         </div>
-        <flux:button icon="arrow-path" variant="primary" wire:click="calculateAllPredictions">
-            {{ __('Perbarui Klasifikasi Dataset') }}
-        </flux:button>
+        <div class="flex items-center gap-2">
+            <flux:select wire:model="santri_id" placeholder="Pilih Santri" class="w-full sm:w-64">
+                <option value="">{{ __('Pilih Santri') }}</option>
+                @foreach ($this->santriOptions as $option)
+                    <option value="{{ $option->id }}">{{ $option->nis }} - {{ $option->nama }}</option>
+                @endforeach
+            </flux:select>
+            <flux:button icon="arrow-path" variant="primary" wire:click="calculateAllPredictions">
+                {{ __('Perbarui Klasifikasi Dataset') }}
+            </flux:button>
+        </div>
     </div>
 
     <!-- Accuracy & Evaluation Statistics -->

@@ -23,6 +23,11 @@ class RiwayatKesehatan extends Model
         return $this->belongsTo(Kamar::class);
     }
 
+    public function datasetTraining()
+    {
+        return $this->belongsTo(DatasetTraining::class);
+    }
+
     public function gejalas()
     {
         return $this->belongsToMany(Gejala::class, 'gejala_riwayat_kesehatan', 'riwayat_kesehatan_id', 'gejala_id');

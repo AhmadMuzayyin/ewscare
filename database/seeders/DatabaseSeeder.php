@@ -8,6 +8,7 @@ use App\Models\Kamar;
 use App\Models\Penyakit;
 use App\Models\Santri;
 use App\Models\User;
+use App\Models\Wilayah;
 use Faker\Factory;
 use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
@@ -47,10 +48,15 @@ class DatabaseSeeder extends Seeder
             ['wilayah' => 'Wilayah 3', 'blok' => 'NTQ', 'jumlah' => 3],
         ];
 
+        $wilayahModels = [];
+        foreach (array_unique(array_column($kamars, 'wilayah')) as $namaWilayah) {
+            $wilayahModels[$namaWilayah] = Wilayah::create(['nama_wilayah' => $namaWilayah]);
+        }
+
         foreach ($kamars as $group) {
             for ($i = 1; $i <= $group['jumlah']; $i++) {
                 Kamar::create([
-                    'wilayah' => $group['wilayah'],
+                    'wilayah_id' => $wilayahModels[$group['wilayah']]->id,
                     'blok' => $group['blok'],
                     'nama_kamar' => 'Kamar '.str_pad((string) $i, 2, '0', STR_PAD_LEFT),
                     'kapasitas' => 15, // Ditingkatkan untuk menampung 10 santri

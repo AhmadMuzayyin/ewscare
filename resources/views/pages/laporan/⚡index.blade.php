@@ -3,6 +3,7 @@
 use App\Models\RiwayatKesehatan;
 use App\Models\Penyakit;
 use App\Models\Kamar;
+use App\Models\Wilayah;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\Attributes\Title;
@@ -52,7 +53,7 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
     public function riwayats()
     {
         return RiwayatKesehatan::query()
-            ->with(['santri.kamar', 'penyakit', 'gejalas'])
+            ->with(['santri.kamar.wilayah', 'kamar.wilayah', 'penyakit', 'gejalas'])
             ->when($this->search, function ($query) {
                 $query->whereHas('santri', function ($q) {
                     $q->where('nama', 'like', '%' . $this->search . '%')
@@ -61,7 +62,7 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
             })
             ->when($this->filterPenyakit, fn($query) => $query->where('penyakit_id', $this->filterPenyakit))
             ->when($this->filterWilayah, function ($query) {
-                $query->whereHas('kamar', fn($q) => $q->where('wilayah', $this->filterWilayah));
+                $query->whereHas('kamar', fn($q) => $q->where('wilayah_id', $this->filterWilayah));
             })
             ->when($this->filterBlok, function ($query) {
                 $query->whereHas('kamar', fn($q) => $q->where('blok', $this->filterBlok));
@@ -79,9 +80,9 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
     }
 
     #[Computed]
-    public function wilayahOptions(): array
+    public function wilayahOptions()
     {
-        return ['Wilayah 1', 'Wilayah 2', 'Wilayah 3'];
+        return Wilayah::orderBy('nama_wilayah')->get();
     }
 
     #[Computed]
@@ -112,7 +113,7 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
         <flux:select label="{{ __('Wilayah') }}" wire:model.live="filterWilayah" placeholder="Semua Wilayah">
             <option value="">Semua Wilayah</option>
             @foreach ($this->wilayahOptions as $option)
-            <option value="{{ $option }}">{{ $option }}</option>
+            <option value="{{ $option->id }}">{{ $option->nama_wilayah }}</option>
             @endforeach
         </flux:select>
 
@@ -148,7 +149,7 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
                     </flux:table.cell>
                     <flux:table.cell>
                         @if($riwayat->kamar)
-                        <div class="text-sm">{{ $riwayat->kamar->wilayah }}</div>
+                        <div class="text-sm">{{ $riwayat->kamar->wilayah->nama_wilayah }}</div>
                         <div class="text-xs text-zinc-500">{{ $riwayat->kamar->blok }} - {{ $riwayat->kamar->nama_kamar }}</div>
                         @else
                         <span class="text-zinc-400">—</span>

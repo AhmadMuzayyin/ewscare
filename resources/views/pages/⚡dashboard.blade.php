@@ -65,11 +65,11 @@ new #[Title('Dashboard EWS Spasial')] class extends Component {
     #[Computed]
     public function mapStructure(): array
     {
-        $kamars = Kamar::orderBy('wilayah')->orderBy('blok')->orderBy('nama_kamar')->get();
+        $kamars = Kamar::with('wilayah')->orderBy('wilayah_id')->orderBy('blok')->orderBy('nama_kamar')->get();
         $structure = [];
 
         foreach ($kamars as $kamar) {
-            $structure[$kamar->wilayah][$kamar->blok][] = $kamar;
+            $structure[$kamar->wilayah->nama_wilayah][$kamar->blok][] = $kamar;
         }
 
         return $structure;
@@ -257,7 +257,7 @@ new #[Title('Dashboard EWS Spasial')] class extends Component {
         @if($selectedKamar)
             <div class="space-y-6">
                 <div>
-                    <flux:heading size="lg">{{ $selectedKamar->wilayah }} - {{ $selectedKamar->blok }} - {{ $selectedKamar->nama_kamar }}</flux:heading>
+                    <flux:heading size="lg">{{ $selectedKamar->wilayah->nama_wilayah }} - {{ $selectedKamar->blok }} - {{ $selectedKamar->nama_kamar }}</flux:heading>
                     <flux:text class="mt-2">{{ __('Daftar kasus kesehatan santri aktif (7 hari terakhir) di kamar ini.') }}</flux:text>
                 </div>
 

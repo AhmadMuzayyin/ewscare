@@ -21,6 +21,10 @@
                 </flux:sidebar.item>
             </flux:sidebar.group>
             <flux:sidebar.group :heading="__('Master')" class="grid">
+                <flux:sidebar.item icon="map-pin" :href="route('wilayah.index')"
+                    :current="request()->routeIs('wilayah.index')" wire:navigate>
+                    {{ __('Wilayah') }}
+                </flux:sidebar.item>
                 <flux:sidebar.item icon="home" :href="route('kamar.index')"
                     :current="request()->routeIs('kamar.index')" wire:navigate>
                     {{ __('Kamar') }}

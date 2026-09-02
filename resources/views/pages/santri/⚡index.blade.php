@@ -35,7 +35,7 @@ new #[Title('Data Santri')] class extends Component {
     public function santris()
     {
         return Santri::query()
-            ->with('kamar')
+            ->with('kamar.wilayah')
             ->when($this->search, function ($query) {
                 $query->where('nama', 'like', '%' . $this->search . '%')
                     ->orWhere('nis', 'like', '%' . $this->search . '%');
@@ -48,7 +48,7 @@ new #[Title('Data Santri')] class extends Component {
     #[Computed]
     public function kamarOptions()
     {
-        return Kamar::orderBy('wilayah')->orderBy('blok')->orderBy('nama_kamar')->get();
+        return Kamar::with('wilayah')->orderBy('wilayah_id')->orderBy('blok')->orderBy('nama_kamar')->get();
     }
 
     public function openCreateModal(): void
@@ -118,7 +118,7 @@ new #[Title('Data Santri')] class extends Component {
         <flux:select wire:model.live="filterKamar" placeholder="Semua Kamar" class="w-full sm:w-64">
             <option value="">Semua Kamar</option>
             @foreach ($this->kamarOptions as $option)
-                <option value="{{ $option->id }}">{{ $option->wilayah }} - {{ $option->blok }} - {{ $option->nama_kamar }}</option>
+                <option value="{{ $option->id }}">{{ $option->wilayah->nama_wilayah }} - {{ $option->blok }} - {{ $option->nama_kamar }}</option>
             @endforeach
         </flux:select>
     </div>
@@ -144,7 +144,7 @@ new #[Title('Data Santri')] class extends Component {
                         </flux:table.cell>
                         <flux:table.cell>
                             @if($santri->kamar)
-                                <flux:text size="sm">{{ $santri->kamar->wilayah }} - {{ $santri->kamar->blok }} - {{ $santri->kamar->nama_kamar }}</flux:text>
+                                <flux:text size="sm">{{ $santri->kamar->wilayah->nama_wilayah }} - {{ $santri->kamar->blok }} - {{ $santri->kamar->nama_kamar }}</flux:text>
                             @else
                                 <flux:text size="sm" class="text-zinc-400">—</flux:text>
                             @endif
@@ -180,7 +180,7 @@ new #[Title('Data Santri')] class extends Component {
             <flux:select label="{{ __('Kamar') }}" wire:model="kamar_id" required>
                 <option value="">{{ __('Pilih Kamar') }}</option>
                 @foreach ($this->kamarOptions as $option)
-                    <option value="{{ $option->id }}">{{ $option->wilayah }} - {{ $option->blok }} - {{ $option->nama_kamar }}</option>
+                    <option value="{{ $option->id }}">{{ $option->wilayah->nama_wilayah }} - {{ $option->blok }} - {{ $option->nama_kamar }}</option>
                 @endforeach
             </flux:select>
 
