@@ -1,15 +1,19 @@
 <?php
 
+use App\Exports\KamarExport;
+use App\Imports\KamarImport;
 use App\Models\Kamar;
 use App\Models\Wilayah;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Flux\Flux;
+use Maatwebsite\Excel\Facades\Excel;
 
 new #[Title('Data Kamar')] class extends Component {
-    use WithPagination;
+    use WithFileUploads, WithPagination;
 
     public string $search = '';
     public string $filterWilayah = '';
@@ -21,6 +25,9 @@ new #[Title('Data Kamar')] class extends Component {
     public string $blok = '';
     public string $nama_kamar = '';
     public int $kapasitas = 10;
+
+    // Import states
+    public $importFile = null;
 
     public function updatedSearch(): void
     {
@@ -115,6 +122,44 @@ new #[Title('Data Kamar')] class extends Component {
         Kamar::findOrFail($id)->delete();
         Flux::toast(variant: 'success', text: __('Kamar berhasil dihapus.'));
     }
+
+    public function downloadTemplate()
+    {
+        return Excel::download(new KamarExport(template: true), 'template-kamar.xlsx');
+    }
+
+    public function exportExcel()
+    {
+        return Excel::download(new KamarExport(), 'data-kamar-' . now()->format('Ymd_His') . '.xlsx');
+    }
+
+    public function openImportModal(): void
+    {
+        $this->importFile = null;
+        $this->resetErrorBag('importFile');
+        $this->modal('kamar-import-modal')->show();
+    }
+
+    public function importExcel(): void
+    {
+        $this->validate([
+            'importFile' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        $import = new KamarImport();
+        Excel::import($import, $this->importFile->getRealPath());
+
+        $failures = $import->failures();
+
+        if ($failures->isEmpty()) {
+            Flux::toast(variant: 'success', text: __('Data kamar berhasil diimpor.'));
+        } else {
+            Flux::toast(variant: 'warning', text: __(':count baris dilewati karena tidak valid. Pastikan nama wilayah pada file sudah sesuai data yang ada.', ['count' => $failures->count()]));
+        }
+
+        $this->reset('importFile');
+        $this->modal('kamar-import-modal')->close();
+    }
 };
 ?>
 
@@ -124,7 +169,12 @@ new #[Title('Data Kamar')] class extends Component {
             <flux:heading size="xl" level="1">{{ __('Data Kamar') }}</flux:heading>
             <flux:text>{{ __('Kelola data kamar dan pembagian wilayah/blok santri.') }}</flux:text>
         </div>
-        <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Kamar') }}</flux:button>
+        <div class="flex items-center gap-2">
+            <flux:button icon="document-arrow-down" variant="ghost" wire:click="downloadTemplate">{{ __('Unduh Template') }}</flux:button>
+            <flux:button icon="arrow-up-tray" variant="ghost" wire:click="openImportModal">{{ __('Import') }}</flux:button>
+            <flux:button icon="arrow-down-tray" variant="ghost" wire:click="exportExcel">{{ __('Export') }}</flux:button>
+            <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Kamar') }}</flux:button>
+        </div>
     </div>
 
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -198,6 +248,32 @@ new #[Title('Data Kamar')] class extends Component {
                     <flux:button variant="ghost">{{ __('Batal') }}</flux:button>
                 </flux:modal.close>
                 <flux:button type="submit" variant="primary">{{ __('Simpan') }}</flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <!-- Modal Import Kamar -->
+    <flux:modal name="kamar-import-modal" class="md:w-[480px]">
+        <form wire:submit.prevent="importExcel" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Import Data Kamar') }}</flux:heading>
+                <flux:text class="mt-2">
+                    {{ __('Unggah file Excel sesuai format template. Pastikan kolom Wilayah cocok dengan data Wilayah yang sudah ada.') }}
+                    <flux:link href="#" wire:click.prevent="downloadTemplate">{{ __('Unduh template di sini') }}</flux:link>.
+                </flux:text>
+            </div>
+
+            <div>
+                <flux:input type="file" label="{{ __('File Excel') }}" wire:model="importFile" accept=".xlsx,.xls,.csv" />
+                @error('importFile') <span class="text-xs text-red-500">{{ $message }}</span> @enderror
+            </div>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">{{ __('Batal') }}</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="importExcel">{{ __('Import') }}</flux:button>
             </div>
         </form>
     </flux:modal>

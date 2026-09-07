@@ -41,6 +41,10 @@
                     :current="request()->routeIs('penyakit.index')" wire:navigate>
                     {{ __('Penyakit') }}
                 </flux:sidebar.item>
+                <flux:sidebar.item icon="clipboard-document-check" :href="route('pemeriksaan.index')"
+                    :current="request()->routeIs('pemeriksaan.index')" wire:navigate>
+                    {{ __('Pemeriksaan') }}
+                </flux:sidebar.item>
             </flux:sidebar.group>
             <flux:sidebar.group :heading="__('Utiliti')" class="grid">
                 <flux:sidebar.item icon="circle-stack" :href="route('dataset.index')"

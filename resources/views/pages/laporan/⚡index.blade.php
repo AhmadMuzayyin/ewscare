@@ -4,6 +4,8 @@ use App\Models\RiwayatKesehatan;
 use App\Models\Penyakit;
 use App\Models\Kamar;
 use App\Models\Wilayah;
+use App\Models\DatasetTraining;
+use App\Models\Gejala;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\Attributes\Title;
@@ -52,7 +54,7 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
     #[Computed]
     public function riwayats()
     {
-        return RiwayatKesehatan::query()
+        $paginator = RiwayatKesehatan::query()
             ->with(['santri.kamar.wilayah', 'kamar.wilayah', 'penyakit', 'gejalas'])
             ->when($this->search, function ($query) {
                 $query->whereHas('santri', function ($q) {
@@ -71,6 +73,67 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
             ->when($this->endDate, fn($query) => $query->whereDate('tanggal_periksa', '<=', $this->endDate))
             ->orderBy('tanggal_periksa', 'desc')
             ->paginate(15);
+
+        // Attach the model's current top prediction to each row, so staff can see whether
+        // the recorded diagnosis still matches what Naive Bayes would classify today.
+        $paginator->getCollection()->transform(function ($riwayat) {
+            $prediction = $this->classifyGejala($riwayat->gejalas->pluck('id')->toArray());
+
+            $riwayat->prediksi_penyakit = $prediction['penyakit'] ?? null;
+            $riwayat->prediksi_confidence = $prediction ? $prediction['probability'] * 100 : null;
+            $riwayat->prediksi_cocok = $prediction ? $prediction['penyakit']->id === $riwayat->penyakit_id : null;
+
+            return $riwayat;
+        });
+
+        return $paginator;
+    }
+
+    /**
+     * Naive Bayes classification (with Laplace smoothing) of the given gejala against
+     * Dataset Training, normalized across all penyakit. Returns the top-scoring result,
+     * or null when there's no Dataset Training to classify against yet.
+     */
+    private function classifyGejala(array $checkedGejalaIds): ?array
+    {
+        $totalDatasets = DatasetTraining::count();
+        $penyakits = Penyakit::all();
+
+        if ($totalDatasets === 0 || $penyakits->isEmpty()) {
+            return null;
+        }
+
+        $gejalas = Gejala::all();
+        $results = [];
+
+        foreach ($penyakits as $penyakit) {
+            $countPenyakit = DatasetTraining::where('penyakit_id', $penyakit->id)->count();
+            $prior = ($countPenyakit + 1) / ($totalDatasets + $penyakits->count());
+
+            $likelihood = 1.0;
+
+            foreach ($gejalas as $gejala) {
+                $countSymptomWithDisease = DatasetTraining::where('penyakit_id', $penyakit->id)
+                    ->whereHas('gejalas', fn($q) => $q->where('gejala_id', $gejala->id))
+                    ->count();
+
+                $pSymptomPresent = ($countSymptomWithDisease + 1) / ($countPenyakit + 2);
+
+                $likelihood *= in_array($gejala->id, $checkedGejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
+            }
+
+            $results[$penyakit->id] = ['penyakit' => $penyakit, 'score' => $prior * $likelihood];
+        }
+
+        $totalScore = array_sum(array_column($results, 'score'));
+
+        foreach ($results as $id => $data) {
+            $results[$id]['probability'] = $totalScore > 0 ? $data['score'] / $totalScore : 1 / $penyakits->count();
+        }
+
+        uasort($results, fn($a, $b) => $b['probability'] <=> $a['probability']);
+
+        return reset($results);
     }
 
     #[Computed]
@@ -138,6 +201,7 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
                 <flux:table.column>{{ __('Gejala Klinis') }}</flux:table.column>
                 <flux:table.column>{{ __('Klasifikasi Penyakit') }}</flux:table.column>
                 <flux:table.column>{{ __('Keyakinan') }}</flux:table.column>
+                <flux:table.column>{{ __('Prediksi Model') }}</flux:table.column>
             </flux:table.columns>
             <flux:table.rows>
                 @foreach ($this->riwayats as $riwayat)
@@ -174,6 +238,20 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
                     </flux:table.cell>
                     <flux:table.cell>
                         <flux:badge color="blue" variant="outline">{{ number_format($riwayat->tingkat_keyakinan, 2) }}%</flux:badge>
+                    </flux:table.cell>
+                    <flux:table.cell>
+                        @if($riwayat->prediksi_penyakit)
+                            <div class="flex items-center gap-2">
+                                <span class="text-sm">{{ $riwayat->prediksi_penyakit->nama_penyakit }}</span>
+                                @if($riwayat->prediksi_cocok)
+                                    <flux:badge color="emerald" size="sm">{{ __('Cocok') }}</flux:badge>
+                                @else
+                                    <flux:badge color="red" size="sm">{{ __('Tidak Cocok') }}</flux:badge>
+                                @endif
+                            </div>
+                        @else
+                            <flux:text size="sm" class="text-zinc-400">—</flux:text>
+                        @endif
                     </flux:table.cell>
                 </flux:table.row>
                 @endforeach

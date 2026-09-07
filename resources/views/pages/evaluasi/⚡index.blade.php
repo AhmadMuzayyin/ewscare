@@ -3,6 +3,7 @@
 use App\Models\DatasetTraining;
 use App\Models\Gejala;
 use App\Models\Penyakit;
+use App\Models\RiwayatKesehatan;
 use App\Models\Santri;
 use Livewire\Component;
 use Livewire\Attributes\Title;
@@ -12,7 +13,8 @@ use Flux\Flux;
 new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
     public ?int $santri_id = null;
 
-    // Array to store the simulated prediction results for all datasets
+    // Array to store the prediction results, either for all Dataset Training entries
+    // (no santri selected) or for one santri's real Pemeriksaan history (santri selected).
     public array $predictions = [];
     public float $accuracy = 0.0;
     public int $totalCorrect = 0;
@@ -20,7 +22,12 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
 
     public function mount(): void
     {
-        $this->calculateAllPredictions();
+        $this->refreshClassification();
+    }
+
+    public function updatedSantriId(): void
+    {
+        $this->refreshClassification();
     }
 
     #[Computed]
@@ -29,80 +36,34 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
         return Santri::orderBy('nama')->get();
     }
 
+    public function refreshClassification(): void
+    {
+        if ($this->santri_id) {
+            $this->calculateSantriPredictions((int) $this->santri_id);
+        } else {
+            $this->calculateAllPredictions();
+        }
+    }
+
+    /**
+     * Test the model against every Dataset Training entry (evaluates model accuracy).
+     */
     public function calculateAllPredictions(): void
     {
         $datasets = DatasetTraining::with(['penyakit', 'gejalas'])->get();
         $totalDatasets = $datasets->count();
 
         if ($totalDatasets === 0) {
-            $this->predictions = [];
-            $this->accuracy = 0.0;
-            $this->totalCorrect = 0;
-            $this->totalIncorrect = 0;
+            $this->resetPredictions();
             return;
         }
-
-        $penyakits = Penyakit::all();
-        $gejalas = Gejala::all();
 
         $predictionsList = [];
         $correctCount = 0;
 
         foreach ($datasets as $dataset) {
-            $checkedGejalaIds = $dataset->gejalas->pluck('id')->toArray();
-
-            $results = [];
-
-            foreach ($penyakits as $penyakit) {
-                // Prior probability P(C_j)
-                $countPenyakit = DatasetTraining::where('penyakit_id', $penyakit->id)->count();
-                $prior = ($countPenyakit + 1) / ($totalDatasets + $penyakits->count());
-
-                $likelihood = 1.0;
-
-                foreach ($gejalas as $gejala) {
-                    // Count entries for this disease with this symptom
-                    $countSymptomWithDisease = DatasetTraining::where('penyakit_id', $penyakit->id)
-                        ->whereHas('gejalas', fn($q) => $q->where('gejala_id', $gejala->id))
-                        ->count();
-
-                    // P(X_i = 1 | C_j)
-                    $pSymptomPresent = ($countSymptomWithDisease + 1) / ($countPenyakit + 2);
-
-                    if (in_array($gejala->id, $checkedGejalaIds)) {
-                        $likelihood *= $pSymptomPresent;
-                    } else {
-                        $likelihood *= (1.0 - $pSymptomPresent);
-                    }
-                }
-
-                $results[$penyakit->id] = [
-                    'penyakit' => $penyakit,
-                    'score' => $prior * $likelihood
-                ];
-            }
-
-            // Normalize scores to get probabilities
-            $totalScore = array_sum(array_column($results, 'score'));
-
-            if ($totalScore > 0) {
-                foreach ($results as $id => $data) {
-                    $results[$id]['probability'] = $data['score'] / $totalScore;
-                }
-            } else {
-                foreach ($results as $id => $data) {
-                    $results[$id]['probability'] = 1 / $penyakits->count();
-                }
-            }
-
-            // Sort by probability desc
-            uasort($results, fn($a, $b) => $b['probability'] <=> $a['probability']);
-
-            $highestResult = reset($results);
-            $predictedPenyakit = $highestResult['penyakit'];
-            $prob = $highestResult['probability'];
-            $confidence = $prob * 100;
-            $isCorrect = $predictedPenyakit->id === $dataset->penyakit_id;
+            $top = $this->classifyGejala($dataset->gejalas->pluck('id')->toArray());
+            $isCorrect = $top['penyakit']->id === $dataset->penyakit_id;
 
             if ($isCorrect) {
                 $correctCount++;
@@ -112,10 +73,11 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
                 'id' => $dataset->id,
                 'penyakit_asli' => $dataset->penyakit,
                 'gejalas' => $dataset->gejalas,
-                'predicted_penyakit' => $predictedPenyakit,
-                'probability' => $prob,
-                'confidence' => $confidence,
-                'is_correct' => $isCorrect
+                'predicted_penyakit' => $top['penyakit'],
+                'probability' => $top['probability'],
+                'confidence' => $top['probability'] * 100,
+                'is_correct' => $isCorrect,
+                'tanggal_periksa' => null,
             ];
         }
 
@@ -126,6 +88,111 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
 
         Flux::toast(variant: 'success', text: __('Hasil Klasifikasi seluruh dataset berhasil diperbarui.'));
     }
+
+    /**
+     * Classify one santri's real Pemeriksaan (RiwayatKesehatan) history: for each recorded
+     * examination, recompute the model's current top prediction from the same gejala and
+     * compare it against the diagnosis that was recorded at the time.
+     */
+    public function calculateSantriPredictions(int $santriId): void
+    {
+        $riwayats = RiwayatKesehatan::with(['penyakit', 'gejalas'])
+            ->where('santri_id', $santriId)
+            ->orderByDesc('tanggal_periksa')
+            ->get();
+
+        if ($riwayats->isEmpty() || DatasetTraining::count() === 0) {
+            $this->resetPredictions();
+            return;
+        }
+
+        $predictionsList = [];
+        $correctCount = 0;
+
+        foreach ($riwayats as $riwayat) {
+            $top = $this->classifyGejala($riwayat->gejalas->pluck('id')->toArray());
+            $isCorrect = $top['penyakit']->id === $riwayat->penyakit_id;
+
+            if ($isCorrect) {
+                $correctCount++;
+            }
+
+            $predictionsList[] = [
+                'id' => $riwayat->id,
+                'penyakit_asli' => $riwayat->penyakit,
+                'gejalas' => $riwayat->gejalas,
+                'predicted_penyakit' => $top['penyakit'],
+                'probability' => $top['probability'],
+                'confidence' => $top['probability'] * 100,
+                'is_correct' => $isCorrect,
+                'tanggal_periksa' => $riwayat->tanggal_periksa,
+            ];
+        }
+
+        $total = count($riwayats);
+        $this->predictions = $predictionsList;
+        $this->totalCorrect = $correctCount;
+        $this->totalIncorrect = $total - $correctCount;
+        $this->accuracy = ($correctCount / $total) * 100;
+
+        Flux::toast(variant: 'success', text: __('Hasil klasifikasi untuk santri terpilih berhasil diperbarui.'));
+    }
+
+    private function resetPredictions(): void
+    {
+        $this->predictions = [];
+        $this->accuracy = 0.0;
+        $this->totalCorrect = 0;
+        $this->totalIncorrect = 0;
+    }
+
+    /**
+     * Naive Bayes classification (with Laplace smoothing) of the given gejala against
+     * Dataset Training, normalized across all penyakit. Returns the top-scoring result:
+     * ['penyakit' => Penyakit, 'score' => float, 'probability' => float].
+     */
+    private function classifyGejala(array $checkedGejalaIds): array
+    {
+        $totalDatasets = DatasetTraining::count();
+        $penyakits = Penyakit::all();
+        $gejalas = Gejala::all();
+
+        $results = [];
+
+        foreach ($penyakits as $penyakit) {
+            // Prior probability P(C_j)
+            $countPenyakit = DatasetTraining::where('penyakit_id', $penyakit->id)->count();
+            $prior = ($countPenyakit + 1) / ($totalDatasets + $penyakits->count());
+
+            $likelihood = 1.0;
+
+            foreach ($gejalas as $gejala) {
+                // Count entries for this disease with this symptom
+                $countSymptomWithDisease = DatasetTraining::where('penyakit_id', $penyakit->id)
+                    ->whereHas('gejalas', fn($q) => $q->where('gejala_id', $gejala->id))
+                    ->count();
+
+                // P(X_i = 1 | C_j)
+                $pSymptomPresent = ($countSymptomWithDisease + 1) / ($countPenyakit + 2);
+
+                $likelihood *= in_array($gejala->id, $checkedGejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
+            }
+
+            $results[$penyakit->id] = ['penyakit' => $penyakit, 'score' => $prior * $likelihood];
+        }
+
+        // Normalize scores to get probabilities
+        $totalScore = array_sum(array_column($results, 'score'));
+
+        foreach ($results as $id => $data) {
+            $results[$id]['probability'] = $totalScore > 0 ? $data['score'] / $totalScore : 1 / $penyakits->count();
+        }
+
+        // Sort by probability desc, return the top match
+        uasort($results, fn($a, $b) => $b['probability'] <=> $a['probability']);
+
+        return reset($results);
+    }
 };
 ?>
 
@@ -134,17 +201,21 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
     <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
             <flux:heading size="xl" level="1">{{ __('Pengujian & Klasifikasi Naive Bayes') }}</flux:heading>
-            <flux:text>{{ __('Halaman evaluasi model Naive Bayes secara otomatis memKlasifikasi seluruh data yang tersimpan di Dataset Training.') }}</flux:text>
+            <flux:text>
+                {{ $santri_id
+                    ? __('Menampilkan hasil klasifikasi untuk riwayat pemeriksaan santri yang dipilih.')
+                    : __('Halaman evaluasi model Naive Bayes secara otomatis memKlasifikasi seluruh data yang tersimpan di Dataset Training.') }}
+            </flux:text>
         </div>
         <div class="flex items-center gap-2">
-            <flux:select wire:model="santri_id" placeholder="Pilih Santri" class="w-full sm:w-64">
-                <option value="">{{ __('Pilih Santri') }}</option>
+            <flux:select wire:model.live="santri_id" placeholder="Pilih Santri" class="w-full sm:w-64">
+                <option value="">{{ __('Semua (Uji Dataset Training)') }}</option>
                 @foreach ($this->santriOptions as $option)
                     <option value="{{ $option->id }}">{{ $option->nis }} - {{ $option->nama }}</option>
                 @endforeach
             </flux:select>
-            <flux:button icon="arrow-path" variant="primary" wire:click="calculateAllPredictions">
-                {{ __('Perbarui Klasifikasi Dataset') }}
+            <flux:button icon="arrow-path" variant="primary" wire:click="refreshClassification">
+                {{ $santri_id ? __('Perbarui Klasifikasi Santri') : __('Perbarui Klasifikasi Dataset') }}
             </flux:button>
         </div>
     </div>
@@ -156,7 +227,7 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
                 <flux:icon name="circle-stack" class="size-6" />
             </div>
             <div>
-                <flux:text size="sm" class="text-zinc-500">{{ __('Total Dataset') }}</flux:text>
+                <flux:text size="sm" class="text-zinc-500">{{ $santri_id ? __('Total Pemeriksaan') : __('Total Dataset') }}</flux:text>
                 <flux:heading size="lg">{{ count($predictions) }}</flux:heading>
             </div>
         </flux:card>
@@ -198,7 +269,10 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
         <flux:table>
             <flux:table.columns>
                 <flux:table.column class="pl-4">{{ __('No') }}</flux:table.column>
-                <flux:table.column>{{ __('Penyakit Target (Dataset)') }}</flux:table.column>
+                @if($santri_id)
+                    <flux:table.column>{{ __('Tanggal') }}</flux:table.column>
+                @endif
+                <flux:table.column>{{ $santri_id ? __('Diagnosa Tercatat') : __('Penyakit Target (Dataset)') }}</flux:table.column>
                 <flux:table.column>{{ __('Gejala Penyakit') }}</flux:table.column>
                 <flux:table.column>{{ __('Hasil Klasifikasi Naive Bayes') }}</flux:table.column>
                 <flux:table.column>{{ __('Probabilitas') }}</flux:table.column>
@@ -209,6 +283,11 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
                 @foreach ($predictions as $index => $pred)
                 <flux:table.row :key="$pred['id']">
                     <flux:table.cell class="pl-4 font-semibold text-zinc-500">{{ $index + 1 }}</flux:table.cell>
+                    @if($santri_id)
+                        <flux:table.cell class="whitespace-nowrap">
+                            {{ $pred['tanggal_periksa'] ? \Carbon\Carbon::parse($pred['tanggal_periksa'])->translatedFormat('d M Y') : '—' }}
+                        </flux:table.cell>
+                    @endif
                     <flux:table.cell variant="strong" class="whitespace-nowrap">
                         {{ $pred['penyakit_asli']->nama_penyakit }}
                     </flux:table.cell>
@@ -227,14 +306,14 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
                     <flux:table.cell class="font-mono text-xs">{{ number_format($pred['probability'], 5) }}</flux:table.cell>
                     <flux:table.cell>
                         <flux:badge color="blue" variant="outline">{{ number_format($pred['confidence'], 2) }}%</flux:badge>
-                        </flux:cell>
-                        <flux:table.cell class="text-center">
-                            @if($pred['is_correct'])
-                            <flux:badge color="emerald" size="sm">{{ __('Cocok') }}</flux:badge>
-                            @else
-                            <flux:badge color="red" size="sm">{{ __('Tidak Cocok') }}</flux:badge>
-                            @endif
-                        </flux:table.cell>
+                    </flux:table.cell>
+                    <flux:table.cell class="text-center">
+                        @if($pred['is_correct'])
+                        <flux:badge color="emerald" size="sm">{{ __('Cocok') }}</flux:badge>
+                        @else
+                        <flux:badge color="red" size="sm">{{ __('Tidak Cocok') }}</flux:badge>
+                        @endif
+                    </flux:table.cell>
                 </flux:table.row>
                 @endforeach
             </flux:table.rows>
@@ -242,8 +321,13 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
         @else
         <div class="text-center p-12 text-zinc-400 dark:text-zinc-500">
             <flux:icon name="circle-stack" class="size-12 mx-auto mb-3" />
-            <div class="font-medium text-lg">{{ __('Belum Ada Dataset Training') }}</div>
-            <flux:text class="text-sm mt-1">{{ __('Silakan tambahkan dataset training terlebih dahulu sebelum menjalankan klasifikasi.') }}</flux:text>
+            @if($santri_id)
+                <div class="font-medium text-lg">{{ __('Belum Ada Data Pemeriksaan') }}</div>
+                <flux:text class="text-sm mt-1">{{ __('Santri ini belum memiliki riwayat pemeriksaan, atau Dataset Training masih kosong.') }}</flux:text>
+            @else
+                <div class="font-medium text-lg">{{ __('Belum Ada Dataset Training') }}</div>
+                <flux:text class="text-sm mt-1">{{ __('Silakan tambahkan dataset training terlebih dahulu sebelum menjalankan klasifikasi.') }}</flux:text>
+            @endif
         </div>
         @endif
     </flux:card>

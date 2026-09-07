@@ -13,6 +13,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::livewire('santri', 'pages::santri.index')->name('santri.index');
     Route::livewire('gejala', 'pages::gejala.index')->name('gejala.index');
     Route::livewire('penyakit', 'pages::penyakit.index')->name('penyakit.index');
+    Route::livewire('pemeriksaan', 'pages::pemeriksaan.index')->name('pemeriksaan.index');
     Route::livewire('dataset', 'pages::dataset.index')->name('dataset.index');
     Route::livewire('prediksi', 'pages::evaluasi.index')->name('prediksi.index');
     Route::livewire('laporan', 'pages::laporan.index')->name('laporan.index');

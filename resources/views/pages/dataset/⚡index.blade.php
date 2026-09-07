@@ -3,6 +3,7 @@
 use App\Models\DatasetTraining;
 use App\Models\Penyakit;
 use App\Models\Gejala;
+use App\Models\RiwayatKesehatan;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\Attributes\Title;
@@ -50,13 +51,51 @@ new #[Title('Dataset Training')] class extends Component {
         return Gejala::orderBy('kode_gejala')->get();
     }
 
-    public function openCreateModal(): void
+    /**
+     * Pull every Pemeriksaan (RiwayatKesehatan) record and copy each unique penyakit + gejala
+     * combination into Dataset Training, so confirmed field cases enrich the model without
+     * retyping. Combinations already present (in Dataset Training, or duplicated across
+     * Pemeriksaan records) are skipped.
+     */
+    public function getDataFromPemeriksaan(): void
     {
-        $this->editingDataset = null;
-        $this->penyakit_id = null;
-        $this->selectedGejalas = [];
+        $existingSignatures = DatasetTraining::with('gejalas')->get()
+            ->map(fn($dataset) => $dataset->penyakit_id . ':' . $dataset->gejalas->pluck('id')->sort()->values()->implode(','))
+            ->flip();
 
-        $this->modal('dataset-modal')->show();
+        $imported = 0;
+        $skipped = 0;
+
+        RiwayatKesehatan::with('gejalas')->get()->each(function ($riwayat) use ($existingSignatures, &$imported, &$skipped) {
+            $gejalaIds = $riwayat->gejalas->pluck('id')->sort()->values()->all();
+
+            if (empty($gejalaIds)) {
+                return;
+            }
+
+            $signature = $riwayat->penyakit_id . ':' . implode(',', $gejalaIds);
+
+            if ($existingSignatures->has($signature)) {
+                $skipped++;
+                return;
+            }
+
+            $dataset = DatasetTraining::create(['penyakit_id' => $riwayat->penyakit_id]);
+            $dataset->gejalas()->sync($gejalaIds);
+
+            $existingSignatures->put($signature, true);
+            $imported++;
+        });
+
+        if ($imported === 0) {
+            Flux::toast(variant: 'warning', text: __('Tidak ada data pemeriksaan baru untuk diambil.'));
+            return;
+        }
+
+        Flux::toast(variant: 'success', text: __(':imported data pemeriksaan berhasil ditambahkan ke Dataset Training (:skipped duplikat dilewati).', [
+            'imported' => $imported,
+            'skipped' => $skipped,
+        ]));
     }
 
     public function editDataset(int $id): void
@@ -78,15 +117,10 @@ new #[Title('Dataset Training')] class extends Component {
 
         $validated = $this->validate($rules);
 
-        if ($this->editingDataset) {
-            $this->editingDataset->update(['penyakit_id' => $validated['penyakit_id']]);
-            $this->editingDataset->gejalas()->sync($validated['selectedGejalas']);
-            Flux::toast(variant: 'success', text: __('Dataset training berhasil diperbarui.'));
-        } else {
-            $dataset = DatasetTraining::create(['penyakit_id' => $validated['penyakit_id']]);
-            $dataset->gejalas()->sync($validated['selectedGejalas']);
-            Flux::toast(variant: 'success', text: __('Dataset training baru berhasil ditambahkan.'));
-        }
+        $this->editingDataset->update(['penyakit_id' => $validated['penyakit_id']]);
+        $this->editingDataset->gejalas()->sync($validated['selectedGejalas']);
+
+        Flux::toast(variant: 'success', text: __('Dataset training berhasil diperbarui.'));
 
         $this->modal('dataset-modal')->close();
     }
@@ -105,7 +139,7 @@ new #[Title('Dataset Training')] class extends Component {
             <flux:heading size="xl" level="1">{{ __('Dataset Training') }}</flux:heading>
             <flux:text>{{ __('Kelola data latih kombinasi gejala dan penyakit untuk model Naive Bayes.') }}</flux:text>
         </div>
-        <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Dataset') }}</flux:button>
+        <flux:button icon="arrow-down-tray" variant="primary" wire:click="getDataFromPemeriksaan">{{ __('Get Data') }}</flux:button>
     </div>
 
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -139,8 +173,8 @@ new #[Title('Dataset Training')] class extends Component {
                         </flux:table.cell>
                         <flux:table.cell class="flex gap-2">
                             <flux:button variant="ghost" icon="pencil-square" size="sm" wire:click="editDataset({{ $dataset->id }})" />
-                            <flux:button variant="ghost" icon="trash" size="sm" class="text-red-500 hover:text-red-600" 
-                                wire:confirm="Apakah Anda yakin ingin menghapus data latih ini?" 
+                            <flux:button variant="ghost" icon="trash" size="sm" class="text-red-500 hover:text-red-600"
+                                wire:confirm="Apakah Anda yakin ingin menghapus data latih ini?"
                                 wire:click="deleteDataset({{ $dataset->id }})" />
                         </flux:table.cell>
                     </flux:table.row>
@@ -149,12 +183,12 @@ new #[Title('Dataset Training')] class extends Component {
         </flux:table>
     </flux:card>
 
-    <!-- Modal Form Dataset -->
+    <!-- Modal Edit Dataset -->
     <flux:modal name="dataset-modal" class="md:w-[500px]">
         <form wire:submit.prevent="saveDataset" class="space-y-6">
             <div>
-                <flux:heading size="lg">{{ $editingDataset ? __('Edit Dataset Training') : __('Tambah Dataset Training') }}</flux:heading>
-                <flux:text class="mt-2">{{ __('Hubungkan penyakit dengan kombinasi gejala di bawah ini.') }}</flux:text>
+                <flux:heading size="lg">{{ __('Edit Dataset Training') }}</flux:heading>
+                <flux:text class="mt-2">{{ __('Perbarui kombinasi penyakit dan gejala di bawah ini.') }}</flux:text>
             </div>
 
             <flux:select label="{{ __('Penyakit') }}" wire:model="penyakit_id" required>

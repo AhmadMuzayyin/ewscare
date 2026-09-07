@@ -1,14 +1,18 @@
 <?php
 
+use App\Exports\GejalaExport;
+use App\Imports\GejalaImport;
 use App\Models\Gejala;
 use Livewire\Component;
+use Livewire\WithFileUploads;
 use Livewire\WithPagination;
 use Livewire\Attributes\Title;
 use Livewire\Attributes\Computed;
 use Flux\Flux;
+use Maatwebsite\Excel\Facades\Excel;
 
 new #[Title('Data Gejala')] class extends Component {
-    use WithPagination;
+    use WithFileUploads, WithPagination;
 
     public string $search = '';
 
@@ -16,6 +20,9 @@ new #[Title('Data Gejala')] class extends Component {
     public ?Gejala $editingGejala = null;
     public string $kode_gejala = '';
     public string $nama_gejala = '';
+
+    // Import states
+    public $importFile = null;
 
     public function updatedSearch(): void
     {
@@ -85,6 +92,44 @@ new #[Title('Data Gejala')] class extends Component {
         Gejala::findOrFail($id)->delete();
         Flux::toast(variant: 'success', text: __('Gejala berhasil dihapus.'));
     }
+
+    public function downloadTemplate()
+    {
+        return Excel::download(new GejalaExport(template: true), 'template-gejala.xlsx');
+    }
+
+    public function exportExcel()
+    {
+        return Excel::download(new GejalaExport(), 'data-gejala-' . now()->format('Ymd_His') . '.xlsx');
+    }
+
+    public function openImportModal(): void
+    {
+        $this->importFile = null;
+        $this->resetErrorBag('importFile');
+        $this->modal('gejala-import-modal')->show();
+    }
+
+    public function importExcel(): void
+    {
+        $this->validate([
+            'importFile' => 'required|file|mimes:xlsx,xls,csv',
+        ]);
+
+        $import = new GejalaImport();
+        Excel::import($import, $this->importFile->getRealPath());
+
+        $failures = $import->failures();
+
+        if ($failures->isEmpty()) {
+            Flux::toast(variant: 'success', text: __('Data gejala berhasil diimpor.'));
+        } else {
+            Flux::toast(variant: 'warning', text: __(':count baris dilewati karena tidak valid. Pastikan data sesuai format template.', ['count' => $failures->count()]));
+        }
+
+        $this->reset('importFile');
+        $this->modal('gejala-import-modal')->close();
+    }
 };
 ?>
 
@@ -94,7 +139,12 @@ new #[Title('Data Gejala')] class extends Component {
             <flux:heading size="xl" level="1">{{ __('Data Gejala') }}</flux:heading>
             <flux:text>{{ __('Kelola parameter gejala klinis untuk diagnosa Naive Bayes.') }}</flux:text>
         </div>
-        <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Gejala') }}</flux:button>
+        <div class="flex items-center gap-2">
+            <flux:button icon="document-arrow-down" variant="ghost" wire:click="downloadTemplate">{{ __('Unduh Template') }}</flux:button>
+            <flux:button icon="arrow-up-tray" variant="ghost" wire:click="openImportModal">{{ __('Import') }}</flux:button>
+            <flux:button icon="arrow-down-tray" variant="ghost" wire:click="exportExcel">{{ __('Export') }}</flux:button>
+            <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Gejala') }}</flux:button>
+        </div>
     </div>
 
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center">
@@ -142,6 +192,32 @@ new #[Title('Data Gejala')] class extends Component {
                     <flux:button variant="ghost">{{ __('Batal') }}</flux:button>
                 </flux:modal.close>
                 <flux:button type="submit" variant="primary">{{ __('Simpan') }}</flux:button>
+            </div>
+        </form>
+    </flux:modal>
+
+    <!-- Modal Import Gejala -->
+    <flux:modal name="gejala-import-modal" class="md:w-[480px]">
+        <form wire:submit.prevent="importExcel" class="space-y-6">
+            <div>
+                <flux:heading size="lg">{{ __('Import Data Gejala') }}</flux:heading>
+                <flux:text class="mt-2">
+                    {{ __('Unggah file Excel sesuai format template.') }}
+                    <flux:link href="#" wire:click.prevent="downloadTemplate">{{ __('Unduh template di sini') }}</flux:link>.
+                </flux:text>
+            </div>
+
+            <div>
+                <flux:input type="file" label="{{ __('File Excel') }}" wire:model="importFile" accept=".xlsx,.xls,.csv" />
+                @error('importFile') <span class="text-xs text-red-500">{{ $message }}</span> @enderror
+            </div>
+
+            <div class="flex gap-2">
+                <flux:spacer />
+                <flux:modal.close>
+                    <flux:button variant="ghost">{{ __('Batal') }}</flux:button>
+                </flux:modal.close>
+                <flux:button type="submit" variant="primary" wire:loading.attr="disabled" wire:target="importExcel">{{ __('Import') }}</flux:button>
             </div>
         </form>
     </flux:modal>

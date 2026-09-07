@@ -3,9 +3,11 @@
 namespace Database\Seeders;
 
 use App\Models\DatasetTraining;
+use App\Models\EwsAlert;
 use App\Models\Gejala;
 use App\Models\Kamar;
 use App\Models\Penyakit;
+use App\Models\RiwayatKesehatan;
 use App\Models\Santri;
 use App\Models\User;
 use App\Models\Wilayah;
@@ -179,5 +181,103 @@ class DatabaseSeeder extends Seeder
                 ]);
             }
         }
+
+        // 5. Seed Pemeriksaan (RiwayatKesehatan) - contoh pemeriksaan santri sungguhan, memakai
+        // kombinasi gejala dari Dataset Training di atas dan probabilitas/keyakinan dihitung
+        // dengan algoritma Naive Bayes yang sama seperti fitur Pemeriksaan (lihat pages/pemeriksaan).
+        $allSantris = Santri::all();
+        $allPenyakits = Penyakit::all();
+        $allGejalas = Gejala::all();
+        $totalDatasetTraining = DatasetTraining::count();
+
+        for ($i = 0; $i < 40; $i++) {
+            $santri = $allSantris->random();
+            $datasetSample = $datasets[array_rand($datasets)];
+            $penyakit = $penyakitModels[$datasetSample['penyakit']];
+            $gejalaIds = array_map(fn ($code) => $gejalaModels[$code]->id, $datasetSample['gejalas']);
+
+            $result = $this->calculateProbability($penyakit->id, $gejalaIds, $allPenyakits, $allGejalas, $totalDatasetTraining);
+
+            $riwayat = RiwayatKesehatan::create([
+                'santri_id' => $santri->id,
+                'penyakit_id' => $penyakit->id,
+                'kamar_id' => $santri->kamar_id,
+                'tanggal_periksa' => now()->subDays(rand(0, 13))->toDateString(),
+                'probabilitas' => $result['probabilitas'],
+                'tingkat_keyakinan' => $result['tingkat_keyakinan'],
+            ]);
+            $riwayat->gejalas()->sync($gejalaIds);
+
+            if (! $penyakit->is_menular) {
+                continue;
+            }
+
+            $alert = EwsAlert::where('kamar_id', $santri->kamar_id)
+                ->where('penyakit_id', $penyakit->id)
+                ->where('status', 'Aktif')
+                ->first();
+
+            if ($alert) {
+                $alert->increment('jumlah_kasus');
+
+                continue;
+            }
+
+            $kamar = $santri->kamar()->with('wilayah')->first();
+            EwsAlert::create([
+                'kamar_id' => $santri->kamar_id,
+                'wilayah' => $kamar?->wilayah?->nama_wilayah,
+                'blok' => $kamar?->blok,
+                'penyakit_id' => $penyakit->id,
+                'jumlah_kasus' => 1,
+                'status' => 'Aktif',
+                'tanggal_dideteksi' => now()->toDateString(),
+            ]);
+        }
+    }
+
+    /**
+     * Naive Bayes probability of the given penyakit given the checked gejala, computed
+     * against Dataset Training (same algorithm as the Pemeriksaan and Klasifikasi pages).
+     *
+     * @return array{probabilitas: float, tingkat_keyakinan: float}
+     */
+    private function calculateProbability(int $penyakitId, array $gejalaIds, $penyakits, $gejalas, int $totalDatasets): array
+    {
+        if ($totalDatasets === 0 || $penyakits->isEmpty()) {
+            return ['probabilitas' => 0.0, 'tingkat_keyakinan' => 0.0];
+        }
+
+        $scores = [];
+
+        foreach ($penyakits as $penyakit) {
+            $countPenyakit = DatasetTraining::where('penyakit_id', $penyakit->id)->count();
+            $prior = ($countPenyakit + 1) / ($totalDatasets + $penyakits->count());
+
+            $likelihood = 1.0;
+
+            foreach ($gejalas as $gejala) {
+                $countSymptomWithDisease = DatasetTraining::where('penyakit_id', $penyakit->id)
+                    ->whereHas('gejalas', fn ($q) => $q->where('gejala_id', $gejala->id))
+                    ->count();
+
+                $pSymptomPresent = ($countSymptomWithDisease + 1) / ($countPenyakit + 2);
+
+                $likelihood *= in_array($gejala->id, $gejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
+            }
+
+            $scores[$penyakit->id] = $prior * $likelihood;
+        }
+
+        $totalScore = array_sum($scores);
+
+        $probability = $totalScore > 0
+            ? ($scores[$penyakitId] ?? 0) / $totalScore
+            : 1 / $penyakits->count();
+
+        return [
+            'probabilitas' => round($probability, 4),
+            'tingkat_keyakinan' => round($probability * 100, 2),
+        ];
     }
 }
