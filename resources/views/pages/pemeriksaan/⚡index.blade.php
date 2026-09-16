@@ -21,7 +21,6 @@ new #[Title('Data Pemeriksaan')] class extends Component {
     // Form states
     public ?RiwayatKesehatan $editingPemeriksaan = null;
     public ?int $santri_id = null;
-    public ?int $penyakit_id = null;
     public array $selectedGejalas = [];
     public string $tanggal_periksa = '';
 
@@ -54,37 +53,35 @@ new #[Title('Data Pemeriksaan')] class extends Component {
     }
 
     #[Computed]
-    public function penyakitOptions()
-    {
-        return Penyakit::orderBy('nama_penyakit')->get();
-    }
-
-    #[Computed]
     public function gejalaOptions()
     {
         return Gejala::orderBy('kode_gejala')->get();
     }
 
     /**
-     * Live preview of the Naive Bayes probability/confidence for the currently selected
-     * penyakit, based on the currently checked gejala. Null when there's not enough
-     * input yet to compute anything.
+     * Live preview of the penyakit the system will automatically assign for the currently
+     * checked gejala, so staff can see the classification before saving. Null when there's
+     * not enough input, or no Dataset Training to classify against yet.
      */
     #[Computed]
-    public function previewResult(): ?array
+    public function classificationPreview(): ?array
     {
-        if (!$this->penyakit_id || empty($this->selectedGejalas)) {
+        if (empty($this->selectedGejalas)) {
             return null;
         }
 
-        return $this->calculateProbability((int) $this->penyakit_id, array_map('intval', $this->selectedGejalas));
+        $top = $this->classifyGejala(array_map('intval', $this->selectedGejalas));
+
+        return $top ? [
+            'penyakit' => $top['penyakit'],
+            'tingkat_keyakinan' => round($top['probability'] * 100, 2),
+        ] : null;
     }
 
     public function openCreateModal(): void
     {
         $this->editingPemeriksaan = null;
         $this->santri_id = null;
-        $this->penyakit_id = null;
         $this->selectedGejalas = [];
         $this->tanggal_periksa = now()->toDateString();
 
@@ -95,7 +92,6 @@ new #[Title('Data Pemeriksaan')] class extends Component {
     {
         $this->editingPemeriksaan = RiwayatKesehatan::with('gejalas')->findOrFail($id);
         $this->santri_id = $this->editingPemeriksaan->santri_id;
-        $this->penyakit_id = $this->editingPemeriksaan->penyakit_id;
         $this->selectedGejalas = $this->editingPemeriksaan->gejalas->pluck('id')->map(fn($id) => (string) $id)->toArray();
         $this->tanggal_periksa = $this->editingPemeriksaan->tanggal_periksa;
 
@@ -106,7 +102,6 @@ new #[Title('Data Pemeriksaan')] class extends Component {
     {
         $rules = [
             'santri_id' => 'required|exists:santris,id',
-            'penyakit_id' => 'required|exists:penyakits,id',
             'selectedGejalas' => 'required|array|min:1',
             'selectedGejalas.*' => 'exists:gejalas,id',
             'tanggal_periksa' => 'required|date',
@@ -114,17 +109,23 @@ new #[Title('Data Pemeriksaan')] class extends Component {
 
         $validated = $this->validate($rules);
 
-        $santri = Santri::findOrFail($validated['santri_id']);
         $gejalaIds = array_map('intval', $validated['selectedGejalas']);
-        $result = $this->calculateProbability((int) $validated['penyakit_id'], $gejalaIds);
+        $top = $this->classifyGejala($gejalaIds);
+
+        if (!$top) {
+            Flux::toast(variant: 'danger', text: __('Belum ada Dataset Training, sistem belum bisa menentukan penyakit secara otomatis.'));
+            return;
+        }
+
+        $santri = Santri::findOrFail($validated['santri_id']);
 
         $payload = [
             'santri_id' => $validated['santri_id'],
-            'penyakit_id' => $validated['penyakit_id'],
+            'penyakit_id' => $top['penyakit']->id,
             'kamar_id' => $santri->kamar_id,
             'tanggal_periksa' => $validated['tanggal_periksa'],
-            'probabilitas' => $result['probabilitas'],
-            'tingkat_keyakinan' => $result['tingkat_keyakinan'],
+            'probabilitas' => round($top['probability'], 4),
+            'tingkat_keyakinan' => round($top['probability'] * 100, 2),
         ];
 
         if ($this->editingPemeriksaan) {
@@ -168,23 +169,22 @@ new #[Title('Data Pemeriksaan')] class extends Component {
     }
 
     /**
-     * Naive Bayes probability of the given penyakit given the checked gejala, computed
-     * against Dataset Training (same algorithm as the Klasifikasi page), normalized across
-     * all penyakit so the result is directly comparable/consistent with that page.
-     *
-     * @return array{probabilitas: float, tingkat_keyakinan: float}
+     * Naive Bayes classification (with Laplace smoothing) of the given gejala against Dataset
+     * Training, normalized across all penyakit (same algorithm as Evaluasi/Laporan). Returns
+     * the top-scoring result ['penyakit' => Penyakit, 'probability' => float], or null when
+     * there's no Dataset Training to classify against yet.
      */
-    private function calculateProbability(int $penyakitId, array $gejalaIds): array
+    private function classifyGejala(array $checkedGejalaIds): ?array
     {
         $totalDatasets = DatasetTraining::count();
         $penyakits = Penyakit::all();
 
         if ($totalDatasets === 0 || $penyakits->isEmpty()) {
-            return ['probabilitas' => 0.0, 'tingkat_keyakinan' => 0.0];
+            return null;
         }
 
         $gejalas = Gejala::all();
-        $scores = [];
+        $results = [];
 
         foreach ($penyakits as $penyakit) {
             $countPenyakit = DatasetTraining::where('penyakit_id', $penyakit->id)->count();
@@ -199,22 +199,21 @@ new #[Title('Data Pemeriksaan')] class extends Component {
 
                 $pSymptomPresent = ($countSymptomWithDisease + 1) / ($countPenyakit + 2);
 
-                $likelihood *= in_array($gejala->id, $gejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
+                $likelihood *= in_array($gejala->id, $checkedGejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
             }
 
-            $scores[$penyakit->id] = $prior * $likelihood;
+            $results[$penyakit->id] = ['penyakit' => $penyakit, 'score' => $prior * $likelihood];
         }
 
-        $totalScore = array_sum($scores);
+        $totalScore = array_sum(array_column($results, 'score'));
 
-        $probability = $totalScore > 0
-            ? ($scores[$penyakitId] ?? 0) / $totalScore
-            : 1 / $penyakits->count();
+        foreach ($results as $id => $data) {
+            $results[$id]['probability'] = $totalScore > 0 ? $data['score'] / $totalScore : 1 / $penyakits->count();
+        }
 
-        return [
-            'probabilitas' => round($probability, 4),
-            'tingkat_keyakinan' => round($probability * 100, 2),
-        ];
+        uasort($results, fn($a, $b) => $b['probability'] <=> $a['probability']);
+
+        return reset($results);
     }
 
     /**
@@ -281,7 +280,7 @@ new #[Title('Data Pemeriksaan')] class extends Component {
     <div class="flex items-center justify-between">
         <div>
             <flux:heading size="xl" level="1">{{ __('Data Pemeriksaan') }}</flux:heading>
-            <flux:text>{{ __('Catat hasil pemeriksaan kesehatan santri beserta gejala dan penyakit yang terdeteksi.') }}</flux:text>
+            <flux:text>{{ __('Catat gejala yang dialami santri — penyakit ditentukan otomatis oleh sistem (Naive Bayes).') }}</flux:text>
         </div>
         <flux:button icon="plus" variant="primary" wire:click="openCreateModal">{{ __('Tambah Pemeriksaan') }}</flux:button>
     </div>
@@ -296,8 +295,8 @@ new #[Title('Data Pemeriksaan')] class extends Component {
                 <flux:table.column class="pl-4">{{ __('Tanggal') }}</flux:table.column>
                 <flux:table.column>{{ __('Santri') }}</flux:table.column>
                 <flux:table.column>{{ __('Kamar') }}</flux:table.column>
-                <flux:table.column>{{ __('Penyakit') }}</flux:table.column>
                 <flux:table.column>{{ __('Gejala') }}</flux:table.column>
+                <flux:table.column>{{ __('Penyakit (Klasifikasi Sistem)') }}</flux:table.column>
                 <flux:table.column>{{ __('Keyakinan') }}</flux:table.column>
                 <flux:table.column class="w-24">{{ __('Aksi') }}</flux:table.column>
             </flux:table.columns>
@@ -316,18 +315,18 @@ new #[Title('Data Pemeriksaan')] class extends Component {
                             <flux:text size="sm" class="text-zinc-400">—</flux:text>
                         @endif
                     </flux:table.cell>
-                    <flux:table.cell class="whitespace-nowrap">
-                        <span>{{ $riwayat->penyakit->nama_penyakit }}</span>
-                        <flux:badge size="sm" :color="$riwayat->penyakit->is_menular ? 'red' : 'zinc'" class="ml-1">
-                            {{ $riwayat->penyakit->is_menular ? __('Menular') : __('Tidak Menular') }}
-                        </flux:badge>
-                    </flux:table.cell>
                     <flux:table.cell class="max-w-xs">
                         <div class="flex flex-wrap gap-1">
                             @foreach ($riwayat->gejalas as $gejala)
                             <flux:badge size="sm" variant="outline" color="blue">{{ $gejala->nama_gejala }}</flux:badge>
                             @endforeach
                         </div>
+                    </flux:table.cell>
+                    <flux:table.cell class="whitespace-nowrap">
+                        <span>{{ $riwayat->penyakit->nama_penyakit }}</span>
+                        <flux:badge size="sm" :color="$riwayat->penyakit->is_menular ? 'red' : 'zinc'" class="ml-1">
+                            {{ $riwayat->penyakit->is_menular ? __('Menular') : __('Tidak Menular') }}
+                        </flux:badge>
                     </flux:table.cell>
                     <flux:table.cell>
                         <flux:badge color="blue" variant="outline">{{ number_format($riwayat->tingkat_keyakinan, 2) }}%</flux:badge>
@@ -349,20 +348,13 @@ new #[Title('Data Pemeriksaan')] class extends Component {
         <form wire:submit.prevent="savePemeriksaan" class="space-y-6">
             <div>
                 <flux:heading size="lg">{{ $editingPemeriksaan ? __('Edit Pemeriksaan') : __('Tambah Pemeriksaan') }}</flux:heading>
-                <flux:text class="mt-2">{{ __('Lengkapi hasil pemeriksaan kesehatan santri di bawah ini.') }}</flux:text>
+                <flux:text class="mt-2">{{ __('Pilih santri dan gejala yang dialami — penyakit akan ditentukan otomatis oleh sistem.') }}</flux:text>
             </div>
 
             <flux:select label="{{ __('Santri') }}" wire:model="santri_id" required>
                 <option value="">{{ __('Pilih Santri') }}</option>
                 @foreach ($this->santriOptions as $option)
                     <option value="{{ $option->id }}">{{ $option->nis }} - {{ $option->nama }}</option>
-                @endforeach
-            </flux:select>
-
-            <flux:select label="{{ __('Penyakit') }}" wire:model.live="penyakit_id" required>
-                <option value="">{{ __('Pilih Penyakit') }}</option>
-                @foreach ($this->penyakitOptions as $option)
-                    <option value="{{ $option->id }}">{{ $option->nama_penyakit }}</option>
                 @endforeach
             </flux:select>
 
@@ -381,28 +373,25 @@ new #[Title('Data Pemeriksaan')] class extends Component {
 
             <flux:input type="date" label="{{ __('Tanggal Periksa') }}" wire:model="tanggal_periksa" required />
 
-            <!-- Probabilitas & Tingkat Keyakinan dihitung otomatis oleh sistem (Naive Bayes) berdasarkan
-                 penyakit dan gejala yang dipilih di atas — tidak bisa diisi manual. -->
             <div class="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-800/50">
-                <flux:text size="sm" class="text-zinc-500">{{ __('Hasil Perhitungan Sistem (Naive Bayes)') }}</flux:text>
-                @if ($this->previewResult)
-                    <div class="mt-2 grid grid-cols-2 gap-4">
-                        <div>
-                            <flux:text size="xs" class="text-zinc-500">{{ __('Probabilitas') }}</flux:text>
-                            <flux:heading size="lg" class="font-mono">{{ number_format($this->previewResult['probabilitas'], 4) }}</flux:heading>
-                        </div>
-                        <div>
-                            <flux:text size="xs" class="text-zinc-500">{{ __('Tingkat Keyakinan') }}</flux:text>
-                            <flux:heading size="lg">{{ number_format($this->previewResult['tingkat_keyakinan'], 2) }}%</flux:heading>
-                        </div>
+                <flux:text size="sm" class="text-zinc-500">{{ __('Penyakit (Ditentukan Otomatis oleh Sistem)') }}</flux:text>
+                @if ($this->classificationPreview)
+                    <div class="mt-2 flex items-center gap-2">
+                        <flux:heading size="lg">{{ $this->classificationPreview['penyakit']->nama_penyakit }}</flux:heading>
+                        <flux:badge size="sm" :color="$this->classificationPreview['penyakit']->is_menular ? 'red' : 'zinc'">
+                            {{ $this->classificationPreview['penyakit']->is_menular ? __('Menular') : __('Tidak Menular') }}
+                        </flux:badge>
                     </div>
+                    <flux:text size="xs" class="mt-1 text-zinc-500">
+                        {{ __('Keyakinan') }}: {{ number_format($this->classificationPreview['tingkat_keyakinan'], 2) }}%
+                    </flux:text>
                 @elseif (\App\Models\DatasetTraining::count() === 0)
                     <flux:text size="sm" class="mt-1 text-amber-600 dark:text-amber-400">
-                        {{ __('Belum ada Dataset Training, probabilitas belum dapat dihitung.') }}
+                        {{ __('Belum ada Dataset Training, penyakit belum dapat ditentukan.') }}
                     </flux:text>
                 @else
                     <flux:text size="sm" class="mt-1 text-zinc-400">
-                        {{ __('Pilih penyakit dan minimal satu gejala untuk melihat hasil perhitungan.') }}
+                        {{ __('Pilih minimal satu gejala untuk melihat penyakit yang terdeteksi.') }}
                     </flux:text>
                 @endif
             </div>

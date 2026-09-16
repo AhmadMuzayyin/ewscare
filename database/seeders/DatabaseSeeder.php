@@ -182,9 +182,9 @@ class DatabaseSeeder extends Seeder
             }
         }
 
-        // 5. Seed Pemeriksaan (RiwayatKesehatan) - contoh pemeriksaan santri sungguhan, memakai
-        // kombinasi gejala dari Dataset Training di atas dan probabilitas/keyakinan dihitung
-        // dengan algoritma Naive Bayes yang sama seperti fitur Pemeriksaan (lihat pages/pemeriksaan).
+        // 5. Seed Pemeriksaan (RiwayatKesehatan) - contoh pemeriksaan santri sungguhan: hanya
+        // gejala yang dicatat, penyakit ditentukan otomatis oleh Naive Bayes (sama seperti
+        // fitur Pemeriksaan sungguhan), memakai kombinasi gejala dari Dataset Training di atas.
         $allSantris = Santri::all();
         $allPenyakits = Penyakit::all();
         $allGejalas = Gejala::all();
@@ -193,18 +193,18 @@ class DatabaseSeeder extends Seeder
         for ($i = 0; $i < 40; $i++) {
             $santri = $allSantris->random();
             $datasetSample = $datasets[array_rand($datasets)];
-            $penyakit = $penyakitModels[$datasetSample['penyakit']];
             $gejalaIds = array_map(fn ($code) => $gejalaModels[$code]->id, $datasetSample['gejalas']);
 
-            $result = $this->calculateProbability($penyakit->id, $gejalaIds, $allPenyakits, $allGejalas, $totalDatasetTraining);
+            $top = $this->classifyGejala($gejalaIds, $allPenyakits, $allGejalas, $totalDatasetTraining);
+            $penyakit = $top['penyakit'];
 
             $riwayat = RiwayatKesehatan::create([
                 'santri_id' => $santri->id,
                 'penyakit_id' => $penyakit->id,
                 'kamar_id' => $santri->kamar_id,
                 'tanggal_periksa' => now()->subDays(rand(0, 13))->toDateString(),
-                'probabilitas' => $result['probabilitas'],
-                'tingkat_keyakinan' => $result['tingkat_keyakinan'],
+                'probabilitas' => round($top['probability'], 4),
+                'tingkat_keyakinan' => round($top['probability'] * 100, 2),
             ]);
             $riwayat->gejalas()->sync($gejalaIds);
 
@@ -237,18 +237,13 @@ class DatabaseSeeder extends Seeder
     }
 
     /**
-     * Naive Bayes probability of the given penyakit given the checked gejala, computed
-     * against Dataset Training (same algorithm as the Pemeriksaan and Klasifikasi pages).
-     *
-     * @return array{probabilitas: float, tingkat_keyakinan: float}
+     * Naive Bayes classification (with Laplace smoothing) of the given gejala against Dataset
+     * Training, normalized across all penyakit (same algorithm as the Pemeriksaan feature).
+     * Returns the top-scoring result: ['penyakit' => Penyakit, 'probability' => float].
      */
-    private function calculateProbability(int $penyakitId, array $gejalaIds, $penyakits, $gejalas, int $totalDatasets): array
+    private function classifyGejala(array $checkedGejalaIds, $penyakits, $gejalas, int $totalDatasets): array
     {
-        if ($totalDatasets === 0 || $penyakits->isEmpty()) {
-            return ['probabilitas' => 0.0, 'tingkat_keyakinan' => 0.0];
-        }
-
-        $scores = [];
+        $results = [];
 
         foreach ($penyakits as $penyakit) {
             $countPenyakit = DatasetTraining::where('penyakit_id', $penyakit->id)->count();
@@ -263,21 +258,20 @@ class DatabaseSeeder extends Seeder
 
                 $pSymptomPresent = ($countSymptomWithDisease + 1) / ($countPenyakit + 2);
 
-                $likelihood *= in_array($gejala->id, $gejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
+                $likelihood *= in_array($gejala->id, $checkedGejalaIds) ? $pSymptomPresent : (1.0 - $pSymptomPresent);
             }
 
-            $scores[$penyakit->id] = $prior * $likelihood;
+            $results[$penyakit->id] = ['penyakit' => $penyakit, 'score' => $prior * $likelihood];
         }
 
-        $totalScore = array_sum($scores);
+        $totalScore = array_sum(array_column($results, 'score'));
 
-        $probability = $totalScore > 0
-            ? ($scores[$penyakitId] ?? 0) / $totalScore
-            : 1 / $penyakits->count();
+        foreach ($results as $id => $data) {
+            $results[$id]['probability'] = $totalScore > 0 ? $data['score'] / $totalScore : 1 / $penyakits->count();
+        }
 
-        return [
-            'probabilitas' => round($probability, 4),
-            'tingkat_keyakinan' => round($probability * 100, 2),
-        ];
+        uasort($results, fn ($a, $b) => $b['probability'] <=> $a['probability']);
+
+        return reset($results);
     }
 }

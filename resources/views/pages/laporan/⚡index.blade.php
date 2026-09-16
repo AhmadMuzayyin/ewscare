@@ -74,14 +74,15 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
             ->orderBy('tanggal_periksa', 'desc')
             ->paginate(15);
 
-        // Attach the model's current top prediction to each row, so staff can see whether
-        // the recorded diagnosis still matches what Naive Bayes would classify today.
+        // Attach the model's current top classification to each row, so staff can spot drift
+        // between the penyakit auto-assigned when the pemeriksaan was recorded (tingkat_keyakinan,
+        // stored at the time) and what Naive Bayes would classify from the same gejala today.
         $paginator->getCollection()->transform(function ($riwayat) {
-            $prediction = $this->classifyGejala($riwayat->gejalas->pluck('id')->toArray());
+            $top = $this->classifyGejala($riwayat->gejalas->pluck('id')->toArray());
 
-            $riwayat->prediksi_penyakit = $prediction['penyakit'] ?? null;
-            $riwayat->prediksi_confidence = $prediction ? $prediction['probability'] * 100 : null;
-            $riwayat->prediksi_cocok = $prediction ? $prediction['penyakit']->id === $riwayat->penyakit_id : null;
+            $riwayat->prediksi_penyakit = $top['penyakit'] ?? null;
+            $riwayat->prediksi_confidence = $top ? $top['probability'] * 100 : null;
+            $riwayat->prediksi_cocok = $top ? $top['penyakit']->id === $riwayat->penyakit_id : null;
 
             return $riwayat;
         });
@@ -90,9 +91,9 @@ new #[Title('Laporan Riwayat Kesehatan')] class extends Component {
     }
 
     /**
-     * Naive Bayes classification (with Laplace smoothing) of the given gejala against
-     * Dataset Training, normalized across all penyakit. Returns the top-scoring result,
-     * or null when there's no Dataset Training to classify against yet.
+     * Naive Bayes classification (with Laplace smoothing) of the given gejala against Dataset
+     * Training, normalized across all penyakit. Returns the top-scoring result, or null when
+     * there's no Dataset Training to classify against yet.
      */
     private function classifyGejala(array $checkedGejalaIds): ?array
     {

@@ -208,12 +208,76 @@ new #[Title('Klasifikasi & Pengujian Model')] class extends Component {
             </flux:text>
         </div>
         <div class="flex items-center gap-2">
-            <flux:select wire:model.live="santri_id" placeholder="Pilih Santri" class="w-full sm:w-64">
-                <option value="">{{ __('Semua (Uji Dataset Training)') }}</option>
-                @foreach ($this->santriOptions as $option)
-                    <option value="{{ $option->id }}">{{ $option->nis }} - {{ $option->nama }}</option>
-                @endforeach
-            </flux:select>
+            @php
+                $santriOptionsForJs = $this->santriOptions->map(fn ($o) => [
+                    'id' => $o->id,
+                    'label' => $o->nis . ' - ' . $o->nama,
+                    'search' => strtolower($o->nis . ' ' . $o->nama),
+                ])->values();
+                $selectedSantri = $santri_id ? $this->santriOptions->firstWhere('id', $santri_id) : null;
+            @endphp
+
+            <!-- Searchable "select": still a dropdown of options (not a free-text field) — the
+                 search box just filters the option list below it. -->
+            <div
+                class="relative w-full sm:w-64"
+                x-data="{
+                    open: false,
+                    query: '',
+                    options: @js($santriOptionsForJs),
+                    label: @js($selectedSantri ? $selectedSantri->nis . ' - ' . $selectedSantri->nama : null),
+                    get filtered() {
+                        const q = this.query.trim().toLowerCase();
+                        return q === '' ? this.options : this.options.filter(o => o.search.includes(q));
+                    },
+                    select(option) {
+                        this.$wire.santri_id = option ? option.id : null;
+                        this.label = option ? option.label : null;
+                        this.open = false;
+                    },
+                }"
+                @click.outside="open = false"
+                x-effect="if (! open) query = ''"
+            >
+                <button
+                    type="button"
+                    @click="open = ! open; $nextTick(() => open && $refs.santriSearch.focus())"
+                    class="flex h-10 w-full items-center justify-between gap-2 rounded-lg border border-zinc-200 border-b-zinc-300/80 bg-white px-3 text-base text-zinc-700 shadow-xs sm:text-sm dark:border-white/10 dark:bg-white/10 dark:text-zinc-300"
+                >
+                    <span x-text="label || '{{ __('Semua (Uji Dataset Training)') }}'" class="truncate"></span>
+                    <flux:icon name="chevron-down" class="size-4 shrink-0 text-zinc-400" />
+                </button>
+
+                <div
+                    x-show="open"
+                    x-cloak
+                    x-transition
+                    class="absolute z-50 mt-1 w-full overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-600 dark:bg-zinc-700"
+                >
+                    <div class="border-b border-zinc-200 p-2 dark:border-zinc-600">
+                        <flux:input x-ref="santriSearch" x-model="query" size="sm" placeholder="{{ __('Cari nama atau NIS...') }}" icon="magnifying-glass" @keydown.escape="open = false" />
+                    </div>
+                    <div class="max-h-60 overflow-y-auto p-1">
+                        <button
+                            type="button"
+                            @click="select(null)"
+                            class="flex w-full items-center rounded-md px-2 py-1.5 text-start text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:text-white dark:hover:bg-zinc-600"
+                        >
+                            {{ __('Semua (Uji Dataset Training)') }}
+                        </button>
+                        <template x-for="option in filtered" :key="option.id">
+                            <button
+                                type="button"
+                                @click="select(option)"
+                                class="flex w-full items-center rounded-md px-2 py-1.5 text-start text-sm font-medium text-zinc-800 hover:bg-zinc-50 dark:text-white dark:hover:bg-zinc-600"
+                                x-text="option.label"
+                            ></button>
+                        </template>
+                        <div x-show="filtered.length === 0" class="px-2 py-1.5 text-sm text-zinc-400" x-text="'{{ __('Tidak ditemukan.') }}'"></div>
+                    </div>
+                </div>
+            </div>
+
             <flux:button icon="arrow-path" variant="primary" wire:click="refreshClassification">
                 {{ $santri_id ? __('Perbarui Klasifikasi Santri') : __('Perbarui Klasifikasi Dataset') }}
             </flux:button>
